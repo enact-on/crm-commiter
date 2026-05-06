@@ -1,0 +1,44 @@
+# CRM Commit Logger
+#
+# Triggers on every push, analyzes the diff with an LLM via OpenRouter,
+# and sends the result to the CRM /api/projects/commit endpoint.
+#
+# SETUP — copy BOTH files to your project repo:
+#   .github/workflows/crm-commit-log.yml   (this file)
+#   .github/scripts/crm_commit_log.py      (the analysis script)
+#
+# Then add these secrets to each repo (or at org level):
+#   OPENROUTER_API_KEY   — your OpenRouter API key
+#   CRM_API_TOKEN        — API token from CRM admin → API → generate token
+#
+# The CRM resolves the project automatically from the repo name (owner/repo),
+# so make sure the project's "GitHub Repo" field is set in the CRM.
+#
+# OPTIONAL — override the model per-repo via a repo/org variable (not a secret):
+#   OPENROUTER_MODEL  e.g. anthropic/claude-3-5-sonnet, openai/gpt-4o, etc.
+#   Default: google/gemini-2.0-flash-001  (1M context, fast, cheap)
+
+name: CRM Commit Log
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  log-commit:
+    name: Analyze & log commit to CRM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Analyze and send to CRM
+        run: node .github/scripts/crm_commit_log.js
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CRM_API_TOKEN: ${{ secrets.CRM_API_TOKEN }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
