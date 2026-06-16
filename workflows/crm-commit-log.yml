@@ -14,7 +14,12 @@
 # The CRM resolves the project automatically from the repo name (owner/repo),
 # so make sure the project's "GitHub Repo" field is set in the CRM.
 #
-# OPTIONAL — override the model per-repo via a repo/org variable (not a secret):
+# OPTIONAL secrets — enable automatic task checklist updates from commits:
+#   NEXTAI_URL            — base URL of the NextAI app (e.g. https://nextai.enacton.com)
+#   NEXTAI_COMMIT_SECRET  — bearer token for the NextAI process-commit endpoint
+#                           (set NEXTAI_COMMIT_SECRET env var in NextAI to the same value)
+#
+# OPTIONAL variables — override defaults per-repo or at org level (not secrets):
 #   OPENROUTER_MODEL  e.g. anthropic/claude-3-5-sonnet, openai/gpt-4o, etc.
 #   Default: google/gemini-2.0-flash-001  (1M context, fast, cheap)
 
@@ -42,3 +47,5 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           CRM_API_TOKEN: ${{ secrets.CRM_API_TOKEN }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          NEXTAI_URL: ${{ secrets.NEXTAI_URL }}
+          NEXTAI_COMMIT_SECRET: ${{ secrets.NEXTAI_COMMIT_SECRET }}

@@ -3,13 +3,17 @@
  *
  * Reads commit data from git, analyzes it with an LLM via OpenRouter,
  * then POSTs the result to the CRM /api/projects/commit endpoint.
+ * If a NextAI URL + secret are configured, also calls the NextAI
+ * process-commit endpoint to auto-update task checklists from the commit.
  *
  * Required env vars (set as GitHub secrets):
  *   OPENROUTER_API_KEY
  *   CRM_API_TOKEN
  *
- * Optional env var (set as a repo/org variable):
- *   OPENROUTER_MODEL  — defaults to deepseek/deepseek-v4-pro
+ * Optional env vars:
+ *   OPENROUTER_MODEL      — defaults to deepseek/deepseek-v4-pro
+ *   NEXTAI_URL            — base URL of the NextAI app (e.g. https://nextai.enacton.com)
+ *   NEXTAI_COMMIT_SECRET  — bearer token for the NextAI process-commit endpoint
  */
 
 "use strict";
@@ -185,8 +189,42 @@ ${diff}`;
               "needs-improvement=vague message, mixed concerns, leftover TODOs; " +
               "poor=no message, massive unrelated changes, broken logic.",
           },
+          work_items: {
+            type: "array",
+            description:
+              "Discrete units of work visible in the diff. Each item is a single " +
+              "feature, fix, refactor, or configuration change. Keep descriptions " +
+              "concise (one sentence, plain English) and use past tense. " +
+              "Skip trivial changes (comment typos, formatting-only). " +
+              "Max 8 items. For merge commits to staging/main, derive items from " +
+              "the feature branch commits that were merged.",
+            items: {
+              type: "object",
+              properties: {
+                description: {
+                  type: "string",
+                  description: "One-sentence plain-English description of the work done.",
+                },
+                completion_status: {
+                  type: "string",
+                  enum: ["completed", "in_progress", "not_applicable"],
+                  description:
+                    "completed=feature/fix is fully done and merged; " +
+                    "in_progress=partial implementation, scaffold, or WIP code; " +
+                    "not_applicable=tooling/config/docs not tied to a task.",
+                },
+                keywords: {
+                  type: "array",
+                  description: "3-6 searchable keywords that would appear in a task title for this work.",
+                  items: { type: "string" },
+                },
+              },
+              required: ["description", "completion_status", "keywords"],
+              additionalProperties: false,
+            },
+          },
         },
-        required: ["summary", "quality"],
+        required: ["summary", "quality", "work_items"],
         additionalProperties: false,
       },
     },
@@ -219,10 +257,11 @@ ${diff}`;
   );
 
   // response_format: json_schema guarantees valid JSON — no parsing fallback needed
-  const { summary = "", quality = "good" } = JSON.parse(orResult.choices[0].message.content);
+  const { summary = "", quality = "good", work_items = [] } = JSON.parse(orResult.choices[0].message.content);
 
   console.log(`[analysis]   quality=${quality}`);
   console.log(`[analysis]   summary=${summary}`);
+  console.log(`[analysis]   work_items=${work_items.length}`);
 
   // ── POST to CRM ───────────────────────────────────────────────────────────
 
@@ -240,5 +279,35 @@ ${diff}`;
     { authtoken: process.env.CRM_API_TOKEN }
   );
 
-  console.log(`[crm] logged → id=${crmResult.id}  status=${crmResult.status}`);
+  console.log(`[crm] logged → id=${crmResult.id}  projectid=${crmResult.projectid}  staffid=${crmResult.staffid}`);
+
+  // ── Call NextAI process-commit (if configured) ────────────────────────────
+
+  const nextaiUrl    = process.env.NEXTAI_URL;
+  const nextaiSecret = process.env.NEXTAI_COMMIT_SECRET;
+  const projectId    = crmResult.projectid;
+  const staffId      = crmResult.staffid;
+
+  if (nextaiUrl && nextaiSecret && projectId && staffId && work_items.length > 0) {
+    try {
+      const nextaiResult = await postJSON(
+        `${nextaiUrl.replace(/\/$/, "")}/api/projects/${projectId}/process-commit`,
+        {
+          commitHash:  sha,
+          summary,
+          workItems:   work_items,
+          staffId,
+          commitDate,
+          repo,
+        },
+        { Authorization: `Bearer ${nextaiSecret}` }
+      );
+      console.log(`[nextai] processed → updates=${nextaiResult.updates?.length ?? 0}`);
+    } catch (err) {
+      // Non-fatal: commit is already logged; checklist update failure is acceptable
+      console.warn(`[nextai] process-commit failed (non-fatal): ${err.message}`);
+    }
+  } else if (nextaiUrl && !nextaiSecret) {
+    console.warn("[nextai] NEXTAI_COMMIT_SECRET is not set — skipping task checklist update");
+  }
 })();
